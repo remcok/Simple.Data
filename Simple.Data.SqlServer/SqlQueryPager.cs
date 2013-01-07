@@ -12,32 +12,34 @@ namespace Simple.Data.SqlServer
     public class SqlQueryPager : IQueryPager
     {
         private static readonly Regex ColumnExtract = new Regex(@"SELECT\s*(.*)\s*(FROM.*)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        private static readonly Regex ColumnDistinctExtract = new Regex(@"SELECT\s*DISTINCT\s*(.*)\s*(FROM.*)", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        private static readonly Regex SelectDistinctMatch = new Regex(@"^SELECT\s*DISTINCT\s*", RegexOptions.IgnoreCase);
         private static readonly Regex SelectMatch = new Regex(@"^SELECT\s*", RegexOptions.IgnoreCase);
-
+        
         public IEnumerable<string> ApplyLimit(string sql, int take)
         {
-            yield return SelectMatch.Replace(sql, match => match.Value + " TOP " + take + " ");
+            yield return (SelectDistinctMatch.IsMatch(sql)
+                ? SelectDistinctMatch.Replace(sql, match => match.Value + " TOP " + take + " ")
+                : SelectMatch.Replace(sql, match => match.Value + " TOP " + take + " "));
         }
-
+        
         public IEnumerable<string> ApplyPaging(string sql, int skip, int take)
         {
             var builder = new StringBuilder("WITH __Data AS (SELECT ");
-
-            var match = ColumnExtract.Match(sql);
+            var match = (ColumnDistinctExtract.IsMatch(sql) ? ColumnDistinctExtract.Match(sql) : ColumnExtract.Match(sql));
             var columns = match.Groups[1].Value.Trim();
             var fromEtc = match.Groups[2].Value.Trim();
 
             builder.Append(columns);
-
+            
             var orderBy = ExtractOrderBy(columns, ref fromEtc);
-
+            
             builder.AppendFormat(", ROW_NUMBER() OVER({0}) AS [_#_]", orderBy);
             builder.AppendLine();
             builder.Append(fromEtc);
             builder.AppendLine(")");
             builder.AppendFormat("SELECT {0} FROM __Data WHERE [_#_] BETWEEN {1} AND {2}", DequalifyColumns(columns),
                                  skip + 1, skip + take);
-
             yield return builder.ToString();
         }
 
